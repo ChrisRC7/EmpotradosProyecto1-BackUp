@@ -1,0 +1,127 @@
+# Paquetes de la imagen y su justificación
+
+El enunciado exige incluir **únicamente** los paquetes estrictamente necesarios y
+justificar cada uno agregado más allá de la imagen mínima base.
+
+**Base:** `core-image-minimal` de poky — el punto de partida más pequeño disponible.
+Se descartaron `core-image-base` y `core-image-full-cmdline` porque arrastran
+utilidades, documentación y servicios que el robot no usa.
+
+**Presupuesto de referencia:** rootfs ≤ 200 MB, arranque ≤ 15 s.
+
+---
+
+## 1. Software propio del proyecto
+
+| Paquete | Justificación |
+|---|---|
+| `librobot` | Biblioteca dinámica de control. Requerimiento obligatorio: es la única vía de acceso al hardware. |
+| `robot-server` | Servidor web de control remoto. Requerimiento obligatorio. |
+| `wifi-config` | Credenciales de WiFi y DHCP en `wlan0`. Sin esto el arranque headless no conecta a la red y el robot queda inaccesible. |
+| `alsa-config` | `asound.conf` que fuerza la card 1, la salida PWM analógica que `audremap` saca por GPIO 18 hacia el PAM8403. Sin esto ALSA elige la card 0 (HDMI) y no sale audio por el parlante. |
+
+## 2. Bibliotecas de las que depende el software propio
+
+| Paquete | Justificación |
+|---|---|
+| `libmicrohttpd` | Servidor HTTP embebido sobre el que corre `robot-server`. Se eligió sobre nginx/lighttpd porque es una biblioteca enlazable en C, no un proceso aparte: no hay que mantener CGI ni un segundo demonio, y el binario resultante son unos pocos cientos de KB. |
+| `mpg123` | Decodificación MP3. Requerimiento obligatorio del enunciado. Es el decodificador más liviano con API en C; se descartó GStreamer, que habría traído decenas de MB de plugins. |
+| `alsa-utils` | `amixer` y `aplay`, para el control de volumen y para diagnosticar la salida de audio en el target. |
+| `alsa-lib` | Runtime de ALSA. Entra como `RDEPENDS` de `librobot` y de `mpg123`, no se lista aparte. |
+
+## 3. GPIO
+
+| Paquete | Justificación |
+|---|---|
+| `pigpio`, `libpigpio`, `libpigpio_if2` | Bibliotecas de acceso a GPIO. Se eligió pigpio sobre `libgpiod` y WiringPi porque genera los **pulsos del servo** del radar por DMA, con temporización estable; mide pulsos con resolución de microsegundos, que es lo que necesita el HC-SR04; y da acceso al **bus I2C** del MPU-6050 por el mismo demonio, sin sumar `i2c-tools` ni otra biblioteca. Los motores no usan PWM: van a velocidad fija, con niveles en los GPIO, por una desviación acordada con el profesor (ver [`hardware-aislamiento.md`](hardware-aislamiento.md#velocidad-fija)). |
+| `pigpio-bin-pigpiod` | El demonio `pigpiod`. `pigpiod_if2` es un cliente que se conecta a él por socket, así que sin el demonio la biblioteca no funciona. Además permite que la biblioteca y el servidor compartan el GPIO sin conflictos. |
+
+> Los binarios `pigs` y `pig2vcd` y los bindings de Python de pigpio **no** se instalan:
+> la receta los separa en paquetes aparte y `do_install` borra `/usr/local`.
+
+## 4. Red y WiFi
+
+| Paquete | Justificación |
+|---|---|
+| `wpa-supplicant` | Autenticación WPA2 contra la red. Es la única forma de que un sistema headless se una solo a la red. |
+| `wireless-regdb-static` | Base de datos regulatoria. Sin ella el kernel restringe los canales y la potencia de transmisión, y el enlace queda inestable o directamente no asocia. |
+| `linux-firmware-rpidistro-bcm43455` | Firmware binario del chip WiFi Broadcom de la RPi 4. Sin él la interfaz `wlan0` ni siquiera aparece. |
+| `dhcpcd` | Cliente DHCP: obtiene la IP con que se accede al panel de control. |
+| `iw`, `rfkill` | Diagnóstico del enlace inalámbrico en el target (`iw dev wlan0 link`, `rfkill list`). Pesan pocos KB y sin ellos depurar un fallo de WiFi sin pantalla es a ciegas. |
+
+## 5. Módulos de kernel
+
+Se listan explícitamente porque `core-image-minimal` **no** instala el paquete
+`kernel-modules` completo, y arrastrarlo entero sumaría decenas de MB de drivers que el
+robot no usa.
+
+| Módulo | Justificación |
+|---|---|
+| `kernel-module-brcmfmac` | Driver del chip WiFi Broadcom. |
+| `kernel-module-brcmfmac-wcc` | Componente de control regulatorio que exige `brcmfmac` en el kernel 6.6. |
+| `kernel-module-brcmutil` | Utilidades compartidas del driver Broadcom. |
+| `kernel-module-snd`, `kernel-module-snd-pcm` | Núcleo del subsistema de sonido ALSA. |
+| `kernel-module-snd-bcm2835` | Driver de la salida de audio analógica de la Raspberry Pi (la que `audremap` saca por GPIO 18). |
+| `kernel-module-i2c-bcm2835` | Driver del controlador I2C del SoC: el bus de GPIO 2/3 donde va el MPU-6050. |
+| `kernel-module-i2c-dev` | Expone el bus como `/dev/i2c-1`, que es por donde `pigpiod` habla con el MPU-6050. Se carga en el arranque (`KERNEL_MODULE_AUTOLOAD`). |
+
+> El sufijo de versión (`-6.6.63-v8`) cambia al actualizar `meta-raspberrypi`. Si el
+> build falla con `Nothing PROVIDES kernel-module-...`, consulte los nombres vigentes
+> con `oe-pkgdata-util list-pkgs | grep brcm` y actualice `robot-image.bb`.
+
+### Overlay de arranque
+
+`audremap.dtbo` no es un paquete sino un archivo de la partición de arranque. Se agrega
+a `RPI_KERNEL_DEVICETREE_OVERLAYS` en `local.conf` porque meta-raspberrypi no lo copia
+por defecto; ocupa unos cientos de bytes. Sin él la línea `dtoverlay=audremap` de
+`config.txt` se ignora y el audio vuelve al jack, que en el robot no está conectado.
+
+## 6. Acceso remoto al sistema
+
+| Paquete / feature | Justificación |
+|---|---|
+| `ssh-server-openssh` | Única vía de acceso al sistema sin pantalla ni teclado; con ella se recogen las métricas de recursos y se diagnostica el robot. |
+| `openssh-sftp-server` | Copiar archivos y evidencias desde y hacia el target. |
+| `debug-tweaks` (en `local.conf`) | Permite entrar como `root` por SSH y por la consola serie. |
+
+---
+
+## Lo que se dejó fuera a propósito
+
+| Excluido | Motivo |
+|---|---|
+| Entorno gráfico (X11, Wayland, Sato) | El enunciado prohíbe interfaz gráfica local en el sistema embebido. Se declara `IMAGE_FEATURES:remove` para que ninguna dependencia lo reintroduzca. |
+| Driver VC4 / Mesa | `DISABLE_VC4GRAPHICS = "1"` en `local.conf`. Sin pantalla, todo el stack de DRM y OpenGL es peso muerto. |
+| GStreamer | `mpg123` cubre el requerimiento de MP3 con una fracción del tamaño. |
+| Python 3 | Todo el software del proyecto es C. Un intérprete completo son ~40 MB de rootfs. |
+| `i2c-tools` | `pigpiod` ya habla I2C con el MPU-6050; `i2cdetect` solo serviría para depurar y se reemplaza con los mensajes del servidor en el journal. |
+| nginx / lighttpd | `libmicrohttpd` se enlaza dentro del propio servidor: un proceso menos y sin configuración externa que mantener. |
+| Bluetooth (`dtparam=krnbt=off`) | El robot no lo usa y libera la UART para la consola serie de depuración. |
+| `kernel-modules` (paquete completo) | Decenas de MB de drivers irrelevantes. Se instalan solo los módulos que el robot necesita: WiFi, sonido e I2C. |
+
+---
+
+## Medición del tamaño
+
+Estas mediciones alimentan el reporte de eficiencia de recursos (issue #30):
+
+```bash
+# Tamaño de la imagen comprimida
+ls -lh tmp/deploy/images/raspberrypi4-64/robot-image-raspberrypi4-64.rootfs.wic.bz2
+
+# Tamaño real del rootfs (incluye las canciones, que en la SD van en p3)
+du -sh tmp/work/raspberrypi4_64-poky-linux/robot-image/1.0/rootfs
+
+# Tamaño de cada partición de la SD: ninguna puede pasar de 200 MB
+wic ls tmp/deploy/images/raspberrypi4-64/robot-image-raspberrypi4-64.rootfs.wic.bz2
+
+# Qué paquete ocupa qué — para decidir qué recortar
+cat tmp/deploy/images/raspberrypi4-64/robot-image-raspberrypi4-64.rootfs.manifest
+```
+
+## Estado
+
+- [x] `IMAGE_INSTALL` revisado y recortado
+- [x] Interfaz gráfica y servicios innecesarios excluidos explícitamente
+- [x] Cada paquete agregado sobre la imagen mínima, justificado
+- [x] Tamaño real del rootfs medido: 129 MB — [`metricas.md`](metricas.md)

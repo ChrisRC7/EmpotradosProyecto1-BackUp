@@ -1,0 +1,592 @@
+% ---------------------------------------------------------------------------
+% Proyecto I - Robot Aspiradora Autonomo (Yocto)
+% CE-1113 Sistemas Empotrados - TEC
+%
+% Diagramas de hardware. El detalle (calculos, listas de materiales y
+% procedimientos de verificacion) vive en docs/hardware-*.md; aqui solo
+% estan los diagramas.
+%
+% Compilar:  pdflatex hardware-diagramas.tex   (dos veces)
+% ---------------------------------------------------------------------------
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage[spanish,es-noshorthands,es-noquoting]{babel}
+\usepackage[margin=2.4cm]{geometry}
+\usepackage{tikz}
+% Sin la opcion siunitx: las etiquetas se escriben en modo matematico
+% ($390\,\Omega$), y asi compila tambien donde no esta instalado texlive-science.
+\usepackage[RPvoltages]{circuitikz}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{caption}
+\usepackage{graphicx}
+
+\usetikzlibrary{positioning,arrows.meta,fit,backgrounds,calc,shapes.geometric}
+
+\captionsetup{font=small,labelfont=bf,width=.92\linewidth}
+\setlength{\parskip}{0.4em}
+\setlength{\parindent}{0pt}
+
+% --- paleta -----------------------------------------------------------------
+\definecolor{cLog}{RGB}{31,102,168}
+\definecolor{cPot}{RGB}{193,84,26}
+\definecolor{cLed}{RGB}{34,120,64}
+\definecolor{cAud}{RGB}{128,64,160}
+\definecolor{cGris}{RGB}{120,120,120}
+\definecolor{cFondo}{RGB}{245,247,250}
+
+% --- estilos comunes --------------------------------------------------------
+\tikzset{
+  blk/.style   ={draw,rounded corners=2pt,align=center,inner sep=4pt,
+                 minimum height=8mm,font=\small},
+  blkl/.style  ={blk,draw=cLog,fill=cLog!8},
+  blkp/.style  ={blk,draw=cPot,fill=cPot!8},
+  blkn/.style  ={blk,draw=cGris,fill=black!3},
+  rot/.style   ={font=\scriptsize\bfseries},
+  ln/.style    ={-{Latex[length=2mm]},thick},
+}
+
+% --- caja de nota -----------------------------------------------------------
+\newsavebox{\notabox}
+\newenvironment{nota}
+  {\par\medskip\begin{lrbox}{\notabox}%
+   \begin{minipage}{\dimexpr0.95\linewidth-14pt\relax}\small}
+  {\end{minipage}\end{lrbox}%
+   \begin{center}\setlength{\fboxsep}{7pt}\colorbox{cFondo}{\usebox{\notabox}}\end{center}\medskip}
+
+% ---------------------------------------------------------------------------
+\title{\vspace{-1.4cm}\textbf{Diagramas de hardware}\\[2pt]
+       \large Proyecto I --- Robot Aspiradora Autónomo}
+\author{\small CE-1113 Sistemas Empotrados --- Tecnológico de Costa Rica}
+\date{\small\today}
+
+\begin{document}
+\maketitle
+\vspace{-0.8cm}
+
+{\small Los cálculos, las listas de materiales y los procedimientos de
+verificación están en \texttt{docs/hardware-*.md}; cómo usa el software el
+radar y el MPU-6050, en \texttt{docs/navegacion-radar.md}. Este documento
+reúne únicamente los diagramas.}
+
+\vspace{0.2cm}
+\hrule
+\vspace{0.4cm}
+
+% ===========================================================================
+\section{Arquitectura general}
+
+Dos fuentes independientes, una por dominio. Un power bank USB alimenta la
+Raspberry Pi y, desde su pin de 5\,V, el servo del radar, el HC-SR04, el
+MPU-6050 y el amplificador. Dos baterías alcalinas de 9\,V en paralelo
+alimentan el puente H y los motores. Las cuatro señales que cruzan hacia el
+dominio de potencia ---las entradas del puente H--- lo hacen a través de
+optoacopladores.
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[font=\small]
+
+  % --- fuentes ---
+  \node[blkl,text width=3.6cm] (pb)  at (-3.1,4.6)
+    {\textbf{Power bank USB}\\[-1pt]\scriptsize 5\,V regulados, por USB-C};
+  \node[blkp,text width=3.3cm] (bat) at (4.4,4.6)
+    {\textbf{2 baterías de 9\,V}\\[-1pt]\scriptsize alcalinas, en paralelo};
+
+  % --- etiquetas de dominio ---
+  \node[rot,text=cLog,below=2mm of pb]  (rl) {DOMINIO LÓGICO\ \ 5\,V / GND\_LOG};
+  \node[rot,text=cPot,below=2mm of bat] (rp) {DOMINIO DE POTENCIA\ \ 9\,V / GND\_POT};
+
+  % --- dominio logico ---
+  \node[blkl,below=3mm of rl,text width=3.6cm] (pi)
+    {\textbf{Raspberry Pi 4 B}\\[-1pt]\scriptsize GPIO $\cdot$ I2C $\cdot$ PWM de audio};
+  \node[blkl,below=2.5mm of pi,text width=3.6cm] (per)
+    {\scriptsize Servo del radar (GPIO 25)\\[-1pt]\scriptsize HC-SR04 del radar\\[-1pt]\scriptsize MPU-6050 (I2C)\\[-1pt]\scriptsize 4 $\times$ LED indicador\\[-1pt]\scriptsize PAM8403 + parlante 8\,$\Omega$};
+  \draw[thick,cLog] (pi) -- (per);
+  \draw[ln,cLog] (pb.south) -- (rl.north);
+
+  % --- dominio de potencia ---
+  \node[blkp,below=3mm of rp,text width=3.3cm] (l298)
+    {\textbf{Driver L298N}\\[-1pt]\scriptsize ENA/ENB con jumper\\[-1pt]\scriptsize regulador de 5\,V interno};
+  \node[blkp,below=2.5mm of l298,text width=3.3cm] (mot)
+    {\scriptsize Motor izq. \quad Motor der.\\[-1pt]\scriptsize con reductora, ruedas de 30\,mm};
+  \draw[ln,cPot] (l298) -- (mot);
+  \draw[ln,cPot] (bat.south) -- (rp.north);
+
+  % --- barrera ---
+  \node[blk,draw=cLed,fill=cLed!8,text=cLed] (opto) at (0.75,2.2)
+    {4 $\times$ PC817\\[-1pt]\scriptsize IN1, IN2,\\[-2pt]\scriptsize IN3, IN4};
+  \draw[ln] (pi.east)   -- (opto.west |- pi.east);
+  \draw[ln] (opto.east |- l298.west) -- (l298.west);
+
+  % La barrera se corta en el bloque de los optos para no tapar su texto.
+  \draw[dashed,thick,cLed] (0.75,5.35) -- (opto.north);
+  \draw[dashed,thick,cLed] (opto.south) -- (0.75,-0.6);
+  \node[rot,text=cLed,fill=white,inner sep=2pt] at (0.75,5.55) {AISLAMIENTO ÓPTICO};
+
+\end{tikzpicture}
+\caption{Arquitectura de hardware: una fuente por dominio y barrera óptica en
+las cuatro señales de control de los motores. El servo pertenece al dominio
+lógico.}
+\end{figure}
+
+\begin{nota}
+\textbf{Sobre la separación de tierras.} Como cada dominio tiene su propia
+fuente, \texttt{GND\_LOG} y \texttt{GND\_POT} no comparten ningún conductor:
+la prueba de «circuito abierto» entre las dos tierras pasa sin condiciones.
+El regulador de 5\,V del propio módulo L298N alimenta su lógica y los
+\emph{pull-up} de los optoacopladores; esos 5\,V nunca se toman de la
+Raspberry Pi, porque eso uniría las dos tierras.
+\end{nota}
+
+\clearpage
+% ===========================================================================
+\section{Aislamiento de las señales de control}
+
+Cuatro canales con PC817, uno por entrada del L298N
+(\texttt{IN1}--\texttt{IN4}), en emisor común. El servo no cruza la barrera:
+se alimenta de los 5\,V de la Raspberry Pi y su señal sale directo del
+GPIO 25.
+El L298N no recibe \texttt{ENA}/\texttt{ENB} de la Pi: sus jumpers quedan
+puestos y el puente está siempre habilitado.
+
+\begin{figure}[h]
+\centering
+\begin{circuitikz}[scale=1.0,transform shape,font=\small]
+
+  % --- rotulos de dominio ---
+  \node[font=\scriptsize\bfseries,text=cLog,anchor=east] at (3.0,4.6)
+        {DOMINIO LÓGICO (3{,}3\,V)};
+  \node[font=\scriptsize\bfseries,text=cPot,anchor=west] at (3.3,4.6)
+        {DOMINIO DE POTENCIA (9\,V)};
+
+  % --- lado logico: GPIO -> R -> LED del opto ---
+  \draw (-0.5,1.6) node[left]{GPIO} to[R=$390\,\Omega$] (2.2,1.6);
+  \draw (2.2,1.6) to[full led] (2.2,0.2);
+  \draw (2.2,0.2) -- (2.2,-0.15) node[ground]{};
+  \node[font=\scriptsize,anchor=east] at (2.95,-0.85) {GND\_LOG};
+
+  % --- encapsulado del opto ---
+  \draw[dashed,rounded corners=2pt,cLed,thick] (1.7,-0.05) rectangle (4.9,2.2);
+  \node[font=\scriptsize\bfseries,text=cLed] at (3.15,2.45) {PC817};
+
+  % --- lado potencia: fototransistor + pull-up ---
+  \draw (4.3,0.9) node[npn,anchor=B,scale=0.9] (Q) {};
+  \draw (Q.C) -- ++(0,1.0) coordinate (ct);
+  \draw (ct) to[R=$4{,}7\,\mathrm{k}\Omega$] ($(ct)+(0,1.3)$)
+        node[above,font=\scriptsize]{$+5\,\mathrm{V}\_\mathrm{POT}$};
+  \draw (Q.E) -- (Q.E |- 0,-0.15) node[ground]{};
+  \node[font=\scriptsize,anchor=west] at (3.35,-0.85) {GND\_POT};
+  \draw (Q.C) -- ++(2.0,0) node[right,align=left,font=\scriptsize]
+        {entrada del\\ L298N};
+
+  % --- barrera ---
+  \draw[dashed,thick,cLed] (3.15,-1.15) -- (3.15,4.3);
+
+\end{circuitikz}
+\caption{Canal de aislamiento con PC817; se repite en las cuatro entradas del L298N.
+Emisor común: el fototransistor conduce cuando el LED enciende, de modo que
+\textbf{la señal sale invertida}. Se compensa en \texttt{lib/lib\_motors.c}.}
+\end{figure}
+
+\begin{center}
+\small
+\begin{tabular}{lccc}
+\toprule
+\textbf{GPIO} & \textbf{LED del opto} & \textbf{Fototransistor} & \textbf{Entrada L298N}\\
+\midrule
+Alto (3{,}3\,V) & encendido & conduce & \textbf{Bajo}\\
+Bajo (0\,V)     & apagado   & en corte & \textbf{Alto} (por el \emph{pull-up})\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{center}
+\small
+\begin{tabular}{ccl}
+\toprule
+\textbf{IN1} & \textbf{IN2} & \textbf{Motor A (ENA con jumper)}\\
+\midrule
+Alto & Bajo & avanza\\
+Bajo & Alto & retrocede\\
+Bajo & Bajo & \textbf{frenado} (\texttt{motores\_detener()})\\
+Alto & Alto & frenado (reposo: GPIO en bajo y \emph{pull-up} arriba)\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{nota}
+\textbf{Compensación de la inversión.} El GPIO en alto deja la entrada del
+L298N en bajo: sin compensar, cada motor giraría al revés.
+\texttt{lib/lib\_motors.c} invierte los niveles (\texttt{OPTO\_INVERTIDO}).
+Verificarlo la primera vez con el robot elevado: al avanzar, las dos llantas
+deben girar hacia adelante.\par\medskip
+\textbf{Velocidad fija, sin PWM.} Las entradas llevan niveles fijos y los
+motores van siempre al máximo; para girar, una llanta hacia adelante y la otra
+hacia atrás. Es una desviación acordada con el profesor: los motores son de
+30\,rpm a 6\,V y 60\,rpm a 12\,V, de alto torque, y trabajan a unos 9\,V; con PWM de 1\,kHz por el PC817
+no se movieron. El apagado lento del opto recorta cada ciclo y el L298N cae
+otros $\sim$2\,V (ver \texttt{docs/hardware-aislamiento.md}).
+\end{nota}
+
+\clearpage
+% ===========================================================================
+\section{Radar y MPU-6050}
+
+Un HC-SR04 sobre un servo de 180° barre siete direcciones; el MPU-6050,
+entre las llantas, mide la aceleración de avance y el giro.
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[font=\scriptsize,scale=1.0]
+
+  % --- centro del robot y eje del servo (10 cm = 2.35 unidades) ---
+  \coordinate (C) at (0,-2.35);
+  \coordinate (S) at (0,0);
+
+  % --- mitad delantera del chasis: circulo de 12 cm de radio en C ---
+  \draw[fill=black!3,draw=black!45,thick]
+        ($(C)+(2.82,0)$) arc[start angle=0,end angle=180,radius=2.82] -- cycle;
+  \node[text=black!55,anchor=north] at ($(C)+(-1.7,-0.05)$) {chasis};
+
+  \fill[black!55] (C) circle (1.4pt);
+  \node[anchor=north,text=black!55] at ($(C)+(0,-0.05)$) {centro del robot};
+  \draw[{Latex[length=1.5mm]}-{Latex[length=1.5mm]},black!55]
+        ($(C)+(-0.35,0)$) -- ($(S)+(-0.35,0)$);
+  \node[anchor=east,text=black!55] at (-0.4,-1.15) {10\,cm};
+
+  % --- cono del haz a 90 grados ---
+  \fill[cLog!12] (S) -- (75:3.3) arc[start angle=75,end angle=105,radius=3.3] -- cycle;
+
+  % --- rayos del barrido ---
+  \foreach \a in {0,30,...,180} {
+    \draw[cLog,thick,-{Latex[length=1.6mm]}] (S) -- (\a:3.0);
+    \node[text=cLog] at (\a:3.35) {\a°};
+  }
+  \node[text=cLog,anchor=north west] at (3.35,-0.1) {derecha};
+  \node[text=cLog,anchor=north east] at (-3.35,-0.1) {izquierda};
+  \node[text=cLog,anchor=south] at (0,3.55) {frente};
+
+  % --- servo y sensor ---
+  \draw[fill=cPot!25,draw=cPot,thick] (-0.3,-0.45) rectangle (0.3,0.1);
+  \draw[fill=cLog!25,draw=cLog,thick] (-0.42,0.05) rectangle (0.42,0.32);
+  \node[text=cPot,anchor=north] at (0,-0.5) {servo};
+
+  % --- tiempos ---
+  \node[align=left,anchor=west,text=black!70] at (4.1,1.6)
+    {\textbf{Por lectura}\\
+     viaje de 30° (a 1/3): 153\,ms\\
+     asentamiento: 30\,ms\\
+     eco (2\,m): $\approx$\,12\,ms\\[2pt]
+     \textbf{Resultado}\\
+     $\approx$\,5 lecturas/s\\
+     frente cada $\approx$\,1{,}2\,s};
+
+\end{tikzpicture}
+\caption{Radar visto desde arriba. El servo se detiene cada 30° en vaivén
+(0 $\rightarrow$ 180 $\rightarrow$ 0) y en cada parada se dispara el HC-SR04,
+cuyo cono de $\sim$15° de semiapertura (sombreado a 90°) solapa con el de las
+lecturas vecinas. Cada lectura frontal con eco actualiza el tiempo antes de
+chocar.}
+\end{figure}
+
+\begin{figure}[h]
+\centering
+\begin{minipage}[t]{0.50\linewidth}
+\centering
+\begin{tikzpicture}[font=\scriptsize]
+
+  % --- conector de la Raspberry Pi ---
+  \draw[fill=cLog!8,draw=cLog,thick,rounded corners=2pt] (0,0) rectangle (1.9,3.0);
+  \node[font=\scriptsize\bfseries,text=cLog] at (0.95,3.25) {Raspberry Pi};
+  \foreach \y/\t in {2.55/{pin 2 \ 5V}, 1.85/{pin 9 \ GND}, 1.15/{pin 5 \ SCL1}, 0.45/{pin 3 \ SDA1}}
+    \node[anchor=east] at (1.85,\y) {\t};
+
+  % --- GY-521 ---
+  \draw[fill=black!4,draw=black!55,thick,rounded corners=2pt] (3.5,-0.95) rectangle (5.1,3.0);
+  \node[font=\scriptsize\bfseries] at (4.3,3.25) {GY-521};
+  \foreach \y/\t in {2.55/VCC, 1.85/GND, 1.15/SCL, 0.45/SDA, -0.25/AD0, -0.7/INT}
+    \node[anchor=west] at (3.55,\y) {\t};
+
+  % --- cables ---
+  \foreach \y/\c in {2.55/cPot, 1.85/black, 1.15/cLog, 0.45/cLed}
+    \draw[thick,\c] (1.9,\y) -- (3.5,\y);
+  \draw[thick] (3.5,-0.25) -- (3.05,-0.25) -- (3.05,-0.55);
+  \draw[thick] (2.85,-0.55) -- (3.25,-0.55);
+  \draw[thick] (2.93,-0.62) -- (3.17,-0.62);
+  \draw[thick] (3.0,-0.69) -- (3.1,-0.69);
+  \node[anchor=east,text=black!60] at (2.8,-0.6) {0x68};
+  \node[anchor=west,text=black!55] at (5.15,-0.7) {n.\,c.};
+
+\end{tikzpicture}
+\\[4pt]
+{\scriptsize \textbf{(a)} MPU-6050 en I2C-1. \textbf{VCC a los 5\,V de la Pi}:
+el GY-521 trae su propio regulador de 3{,}3\,V. Conviene medir que SDA y SCL
+no pasen de 3{,}3\,V. La Pi ya trae 1{,}8\,k$\Omega$ a 3{,}3\,V en esas líneas.}
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.44\linewidth}
+\centering
+\begin{circuitikz}[scale=0.85,transform shape,font=\small]
+  % senal (naranja), 5 V (rojo) y tierra (cafe), de arriba abajo
+  \draw (0,3.7) node[left,font=\scriptsize,align=right]{señal\\(GPIO 25)} -- (4.4,3.7);
+  \draw (0,2.9) node[left,font=\scriptsize,align=right]{5\,V\\(pin de la Pi)} -- (4.4,2.9);
+  \draw (0,0.5) -- (4.4,0.5);
+  \draw (0.9,2.9) to[C,l_=$470\,\mu\mathrm{F}$,*-*] (0.9,0.5);
+  \draw (2.6,2.9) to[C,l=$100\,\mathrm{nF}$,*-*] (2.6,0.5);
+  \draw (0.9,0.5) -- (0.9,0.2) node[ground]{};
+  \node[font=\scriptsize,anchor=west] at (1.1,-0.35) {GND\_LOG};
+  \draw[fill=cPot!15,draw=cPot,thick,rounded corners=2pt] (4.4,0.2) rectangle (5.7,4.0);
+  \node[font=\scriptsize\bfseries,text=cPot,align=center] at (5.05,2.1) {Servo\\180°};
+  \node[font=\tiny,anchor=south east,text=cPot] at (4.35,3.72) {naranja};
+  \node[font=\tiny,anchor=south east,text=cPot] at (4.35,2.92) {rojo};
+  \node[font=\tiny,anchor=south east,text=cPot] at (4.35,0.52) {café};
+\end{circuitikz}
+\\[4pt]
+{\scriptsize \textbf{(b)} Servo alimentado de los 5\,V de la Raspberry Pi,
+con la señal directa del GPIO 25. Los capacitores en sus bornes absorben el
+pico de cada paso del barrido.}
+\end{minipage}
+\caption{Conexión del MPU-6050 y del servo. El GY-521 va plano y atornillado
+entre las dos llantas, con X hacia el frente y Z hacia arriba.}
+\end{figure}
+
+\clearpage
+% ===========================================================================
+\section{Acondicionamiento de señal}
+
+\begin{figure}[h]
+\centering
+\begin{minipage}[t]{0.46\linewidth}
+\centering
+\begin{circuitikz}[scale=0.92,transform shape,font=\small]
+  \draw (0,3.4) node[above,font=\scriptsize,align=center]{HC-SR04 \texttt{ECHO}\\ (5\,V)}
+        -- (0,3.0)
+        to[R=$1\,\mathrm{k}\Omega$] (0,1.6);
+  \draw (0,1.6) -- (1.6,1.6) node[right,font=\scriptsize,align=left]
+        {GPIO 27\\ (3{,}3\,V máx.)};
+  \draw (0,1.6) to[R=$2\,\mathrm{k}\Omega$] (0,0.1);
+  \draw (0,0.1) node[ground]{};
+  \node[font=\scriptsize,anchor=west] at (0.35,-0.5) {GND\_LOG};
+\end{circuitikz}
+\\[4pt]
+{\footnotesize $V_{out}=5\,\mathrm{V}\cdot\dfrac{2\,\mathrm{k}}{1\,\mathrm{k}+2\,\mathrm{k}}=3{,}33\,\mathrm{V}$}
+\\[2pt]
+{\scriptsize \textbf{(a)} Divisor en \texttt{ECHO} --- una unidad, la del radar.}
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.46\linewidth}
+\centering
+\begin{circuitikz}[scale=0.92,transform shape,font=\small]
+  \draw (0,1.6) node[left,font=\scriptsize]{GPIO}
+        to[R=$R$] (2.4,1.6)
+        to[full led] (2.4,0.3);
+  \draw (2.4,0.3) -- (2.4,0.1) node[ground]{};
+  \node[font=\scriptsize,anchor=west] at (2.75,-0.5) {GND\_LOG};
+\end{circuitikz}
+\\[4pt]
+{\footnotesize $R=(3{,}3\,\mathrm{V}-V_f)/I_f$, \ con $I_f{=}5\,\mathrm{mA}$}
+\\[2pt]
+{\scriptsize \textbf{(b)} LED indicador --- 4 unidades.}
+\end{minipage}
+\caption{Acondicionamiento entre el GPIO y el mundo exterior. El divisor
+\textbf{no es opcional}: los GPIO toleran 3{,}3\,V como máximo absoluto y no
+tienen protección de entrada.}
+\end{figure}
+
+\begin{center}
+\small
+\begin{tabular}{lcccc}
+\toprule
+\textbf{LED} & \textbf{Color} & \textbf{$V_f$} & \textbf{$R$ comercial} & \textbf{GPIO (BCM)}\\
+\midrule
+Encendido & verde    & 2{,}2\,V & $220\,\Omega$ & 16\\
+Autónomo  & azul     & 3{,}0\,V & $68\,\Omega$  & 20\\
+Manual    & amarillo & 2{,}1\,V & $270\,\Omega$ & 21\\
+Obstáculo & rojo     & 2{,}0\,V & $270\,\Omega$ & 26\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+% ===========================================================================
+\section{Salida de audio}
+
+La salida PWM analógica de la Pi ---la que normalmente va al jack--- sale por
+GPIO\,18 con \texttt{dtoverlay=audremap,pins\_18\_19}, pasa por un filtro RC
+y entra a un amplificador clase D PAM8403. La biblioteca mezcla cada pista a
+mono: el robot tiene un solo parlante.
+
+\begin{figure}[h]
+\centering
+\begin{circuitikz}[scale=0.88,transform shape,font=\small]
+
+  % --- filtro y divisor ---
+  \draw (-0.4,2.2) node[left,align=right,font=\scriptsize]{GPIO 18\\(PWM, pin 12)}
+        to[R=$4{,}7\,\mathrm{k}\Omega$] (2.4,2.2);
+  \draw (2.4,2.2) to[R=$1\,\mathrm{k}\Omega$,*-] (2.4,0.2) node[ground]{};
+  \draw (2.4,2.2) -- (3.9,2.2) to[C=$10\,\mathrm{nF}$,*-] (3.9,0.2) node[ground]{};
+  \draw (3.9,2.2) to[C=$1\,\mu\mathrm{F}$] (5.9,2.2) -- (6.5,2.2);
+
+  % --- amplificador ---
+  \draw[rounded corners=2pt,fill=cAud!8,draw=cAud,thick] (6.5,0.5) rectangle (9.0,3.1);
+  \node[font=\small\bfseries,text=cAud] at (7.75,2.75) {PAM8403};
+  \node[font=\scriptsize,anchor=west] at (6.55,2.2) {L in};
+  \node[font=\scriptsize,anchor=west] at (6.55,1.0) {G};
+  \node[font=\scriptsize,anchor=east] at (8.95,2.2) {L$+$};
+  \node[font=\scriptsize,anchor=east] at (8.95,1.2) {L$-$};
+  \node[font=\scriptsize] at (7.75,0.75) {VDD};
+  \draw (6.5,1.0) -- (6.1,1.0) -- (6.1,0.2) node[ground]{};
+  \node[font=\scriptsize] at (4.6,-0.55) {GND\_LOG};
+
+  % --- alimentacion y desacople ---
+  \draw (7.75,0.5) -- (7.75,-0.2) -- (12.2,-0.2);
+  \draw (8.9,-0.2) to[C,l_=$100\,\mu\mathrm{F}$,*-] (8.9,-1.7) node[ground]{};
+  \draw (10.7,-0.2) to[C,l=$100\,\mathrm{nF}$,*-] (10.7,-1.7) node[ground]{};
+  \draw (12.2,-0.2) node[right,font=\scriptsize]{$+5\,\mathrm{V}\_\mathrm{LOG}$};
+
+  % --- parlante en puente ---
+  \draw (9.0,2.2) -- (10.3,2.2);
+  \draw (10.3,2.2) to[loudspeaker] (10.3,1.2);
+  \draw (10.3,1.2) -- (9.0,1.2);
+  \node[font=\scriptsize,anchor=west,align=left] at (11.3,1.7) {parlante\\8\,$\Omega$, 1--3\,W};
+
+\end{circuitikz}
+\caption{Salida de audio. El divisor baja el PWM de 3{,}3\,V a unos
+0{,}2\,V$_\mathrm{RMS}$ y, con los 10\,nF, forma un pasabajos de 19\,kHz que
+quita la portadora; con los 24\,dB del PAM8403 da $\approx$\,1{,}3\,W en
+8\,$\Omega$. \textbf{El parlante va entre L$+$ y L$-$: las salidas son en
+puente y ninguna va a tierra.} El amplificador se alimenta del riel lógico,
+lejos del ruido de los motores; el volumen se controla por software con
+\texttt{amixer}.}
+\end{figure}
+
+\clearpage
+% ===========================================================================
+\section{Mapa del conector de 40 pines}
+
+Numeración BCM entre paréntesis. Los pines sin etiqueta quedan libres.
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[font=\scriptsize,y=-0.435cm]
+
+  \def\dx{1.05}
+
+  % --- cuerpo del conector ---
+  \draw[rounded corners=3pt,fill=black!4,draw=black!35]
+        (-\dx-0.42,-0.55) rectangle (\dx+0.42,19.55);
+
+  % --- columna impar (izquierda) ---
+  \foreach \p/\lbl/\c in {%
+      1/{3V3 (VCC del MPU)}/cGris, 3/{SDA del MPU (2)}/cLog,
+      5/{SCL del MPU (3)}/cLog, 9/{GND (MPU)}/cGris,
+      11/{TRIG del radar (17)}/cLog, 13/{ECHO del radar (27)}/cLog,
+      17/3V3/cGris, 25/GND/cGris,
+      29/{IN1 motor izq. (5)}/cPot, 31/{IN2 motor izq. (6)}/cPot,
+      37/{LED obstáculo (26)}/cLed,
+      39/GND/cGris}
+  {
+    \pgfmathtruncatemacro{\r}{(\p-1)/2}
+    \fill[\c] (-\dx,\r) circle (2.1pt);
+    \node[anchor=east,text=\c] at (-\dx-0.55,\r) {\lbl};
+  }
+
+  % --- columna par (derecha) ---
+  \foreach \p/\lbl/\c in {%
+      2/5V/cGris, 4/5V/cGris, 6/GND/cGris,
+      12/{audio PWM $\rightarrow$ PAM8403 (18)}/cAud, 14/GND/cGris,
+      16/{IN3 motor der. (23)}/cPot, 18/{IN4 motor der. (24)}/cPot,
+      20/GND/cGris, 22/{servo del radar (25)}/cLog,
+      30/GND/cGris,
+      34/GND/cGris, 36/{LED encendido (16)}/cLed,
+      38/{LED autónomo (20)}/cLed, 40/{LED manual (21)}/cLed}
+  {
+    \pgfmathtruncatemacro{\r}{(\p-2)/2}
+    \fill[\c] (\dx,\r) circle (2.1pt);
+    \node[anchor=west,text=\c] at (\dx+0.55,\r) {\lbl};
+  }
+
+  % --- GPIO 19: tomado por audremap, sin conectar ---
+  \draw[cAud] (-\dx,17) circle (2.1pt);
+  \node[anchor=east,text=cAud!70] at (-\dx-0.55,17) {2.º canal de audio (19), sin conectar};
+
+  % --- pines libres ---
+  \foreach \p in {7,15,19,21,23,27,33}
+    { \pgfmathtruncatemacro{\r}{(\p-1)/2}
+      \draw[black!30] (-\dx,\r) circle (2.1pt); }
+  \foreach \p in {8,10,24,26,28,32}
+    { \pgfmathtruncatemacro{\r}{(\p-2)/2}
+      \draw[black!30] (\dx,\r) circle (2.1pt); }
+
+  % --- numeros de pin ---
+  \foreach \r in {0,...,19} {
+    \pgfmathtruncatemacro{\a}{2*\r+1}
+    \pgfmathtruncatemacro{\b}{2*\r+2}
+    \node[text=black!45,font=\tiny,anchor=east] at (-0.18,\r) {\a};
+    \node[text=black!45,font=\tiny,anchor=west] at (0.18,\r) {\b};
+  }
+
+  % --- leyenda ---
+  \node[anchor=west,text=cLog,font=\scriptsize\bfseries]  at (-7.0,20.9) {$\bullet$\ \ sensores};
+  \node[anchor=west,text=cPot,font=\scriptsize\bfseries]  at (-4.9,20.9) {$\bullet$\ \ motores (vía opto)};
+  \node[anchor=west,text=cLed,font=\scriptsize\bfseries]  at (-0.2,20.9) {$\bullet$\ \ LEDs};
+  \node[anchor=west,text=cAud,font=\scriptsize\bfseries]  at (1.4,20.9) {$\bullet$\ \ audio};
+  \node[anchor=west,text=cGris,font=\scriptsize\bfseries] at (2.95,20.9) {$\bullet$\ \ alimentación};
+
+\end{tikzpicture}
+\caption{Conector de 40 pines. Los motores se controlan con las entradas
+del L298N (GPIO 5, 6, 23 y 24), con niveles fijos y sin PWM, por una
+desviación acordada con el profesor. GPIO 12 y 13, que
+llevaban \texttt{ENA}/\texttt{ENB}, quedan libres. El audio sale por GPIO 18 con \texttt{audremap}; GPIO 2/3 son el bus
+I2C-1 del MPU-6050; GPIO 14/15 (UART) quedan libres para la consola serie.}
+\end{figure}
+
+\clearpage
+% ===========================================================================
+\section{Modelo físico}
+
+Carcasa circular de 215\,mm impresa en 3D, en dos piezas que cierran a
+presión con cuatro pestañas, sin tornillos. La forma circular permite girar
+sobre el propio eje sin barrer área adicional: cualquier rincón del que el
+robot pueda entrar es un rincón del que puede salir. El modelo paramétrico y
+las piezas para imprimir están en \texttt{modelo-3d/}.
+
+\begin{figure}[h]
+\centering
+\begin{minipage}[t]{0.49\linewidth}
+\centering
+\includegraphics[width=\linewidth]{../modelo-3d/vistas/vista_6_armada.png}
+\\[2pt]{\scriptsize \textbf{(a)} Carcasa armada: 215\,mm de diámetro y 45\,mm
+de alto; con las ruedas, 53\,mm.}
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.49\linewidth}
+\centering
+\includegraphics[width=\linewidth]{../modelo-3d/vistas/succion_6_explosionada.png}
+\\[2pt]{\scriptsize \textbf{(b)} Las dos piezas separadas, con la placa
+perforada, la Raspberry Pi, los motores y el ventilador.}
+\end{minipage}
+\\[8pt]
+\begin{minipage}[t]{0.49\linewidth}
+\centering
+\includegraphics[width=\linewidth]{../modelo-3d/vistas/vista_1_distribucion.png}
+\\[2pt]{\scriptsize \textbf{(c)} Distribución vista desde arriba. El eje de
+tracción va 12\,mm por delante del centro y la bola de apoyo, atrás.}
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.49\linewidth}
+\centering
+\includegraphics[width=\linewidth]{../modelo-3d/vistas/succion_4_por_debajo.png}
+\\[2pt]{\scriptsize \textbf{(d)} Por debajo: boca de succión de
+70\,$\times$\,12\,mm al frente, ruedas de 30\,mm y bola de 16\,mm.}
+\end{minipage}
+\caption{Modelo físico. La separación al piso es de 8\,mm. El radar, el
+L298N, el power bank y las baterías de 9\,V van también dentro de la carcasa,
+en el espacio libre.}
+\end{figure}
+
+\end{document}
